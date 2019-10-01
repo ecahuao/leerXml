@@ -11,56 +11,115 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Security;
-//using System.Windows.Forms;
+using System.Collections.Generic;
+//using LeerXML.Clases.Utilities;
 
+
+//using System.Windows.Forms;
 namespace LeerXML
 {
     class Program
     {
+        
         static void Main(string[] args)
         {
-            String XmlDictionaryString = "C:\\XML\\B-760998_Exportacion.xml";
-            CreateTable(XmlDictionaryString);
-            InsertTable(XmlDictionaryString);
+            
+            String header = " BEGIN TRY " +
+                " BEGIN TRAN X; " +
+                " DECLARE @tbl_pagos TABLE(id INT IDENTITY(1, 1), pago_nodo XML) " +
+                " DECLARE @id_comprobante INT, @id_pago INT, @pagos_indice INT = 1, @pagos_maximo INT = 0, @pago_nodo XML ";
+
+            String bottom = " END TRY" +
+                " BEGIN CATCH "+
+                " IF(XACT_STATE()) = -1 " +
+                " BEGIN " +
+                " ROLLBACK TRAN X; " +
+                " THROW; " +
+                " END "+
+                " END CATCH ";
+            //String XmlDictionaryString = "C:\\XML\\CP-1456814_Complemento_Pago.xml";
+            String XmlDictionaryString = "C:\\XML\\B-55238797_Ingresos_Nacional.xml";
+            CreateTable Crear = new CreateTable();
+            Utilities util = new Utilities();
+            string InstructionCreate = Crear.CreateTableInstruction(XmlDictionaryString);
+           // Boolean errConexion = util.Conectar(InstructionCreate);
+            string InstruccionInsert = InsertTable(XmlDictionaryString);
         }
-        public static void Conectar(String script)
+
+        public static string InsertTable(String XmlString)
         {
-            //using (SqlConnection cn = new SqlConnection("Server=tcp:sfnetlab.database.windows.net,1433;Initial Catalog=dbSoftHard;Persist Security Info=False;User ID=testuser;Password=Factory2020;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;")) ;
-            string sqlConnectionString = @"Server=tcp:sfnetlab.database.windows.net,1433;Initial Catalog=dbSoftHard;Persist Security Info=False;User ID=testuser;Password=Factory2020;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
-            //string script = File.ReadAllText(@"E:\Project Docs\MX462-PD\MX756_ModMappings1.sql");
-            SqlConnection conn = new SqlConnection(sqlConnectionString);
-            Server server = new Server(new ServerConnection(conn));
-            server.ConnectionContext.ExecuteNonQuery(script);
-        }
-        public static void InsertTable(String XmlString)
-        {
-            int i = 0;
-            String Stored = "";
+            List<string> varList = new List<string>();
+            List<String> NodoTree = new List<String>();
+            int i, CurrentDepth = 0;
+            string Node= "";
+            string Script = "";
+            string XMLVar = "@cfdi";
+            Boolean MeanWhile = false;
             XmlTextReader reader = new XmlTextReader(XmlString);
             while (reader.Read())
             {
                 switch (reader.NodeType)
                 {
                     case XmlNodeType.Element:
-                        //Console.WriteLine("<{0}>", reader.Name);
-                        if (reader.AttributeCount != 0)
+                    { 
+                        if (CurrentDepth < reader.Depth)
                         {
-                            i = 0;
-                            Stored = Stored+"INSERT INTO " + reader.LocalName +
-                                " VALUES ("  ;
-                            while (reader.MoveToNextAttribute()) // Read the attributes.
+                            CurrentDepth += 1;
+                            NodoTree.Add(Node);
+                            varList.Add(Node);                        }
+
+                        if (CurrentDepth > reader.Depth)
+                        {
+                            while (CurrentDepth != reader.Depth)
                             {
-                                //Console.WriteLine("         " + reader.Name /* + "='" + reader.Value + "'    " /*+  reader.ValueType.FullName*/);
-                                i = i + 1;
-                                Stored = Stored + As(reader.Value)+reader.Value +As(reader.Value);
-                                if (i != (reader.AttributeCount))
-                                    Stored = Stored + ",";
-                                /*else
-                                    Stored = Stored + reader.LocalName;
-                                //reader.ReadEndElement();*/
+                                CurrentDepth -= 1;
+                                NodoTree.RemoveAt(NodoTree.Count - 1);
                             }
-                            Stored = Stored + ")";
                         }
+                        //NodoTree.Add(reader.Name);
+                        if (Node == reader.LocalName)
+                        {
+                            if (!MeanWhile)
+                            {
+                                MeanWhile = true;
+                                Script = InsertWhile(Script, reader.LocalName, XMLVar, NodoTree, Node);
+                               // Script = Script + "Abrir While" + Environment.NewLine ;
+                                //Console.WriteLine("Abrir While");
+                            }
+                        }
+                        else
+                        {
+                            if (MeanWhile)
+                            {
+                                MeanWhile = false;
+                                Script = Script + "END" + Environment.NewLine;
+                                //Console.WriteLine("Cerrar While");
+                            }
+                            Script = Script + Environment.NewLine;
+                            Console.WriteLine("<{0}>", reader.Name);
+                            Node = reader.LocalName;
+                            if (reader.AttributeCount != 0)
+                            {
+                                Script = Script + " INSERT INTO tbl_" + reader.LocalName.ToLower() + Environment.NewLine;
+                                Script = Script + " SELECT ";
+                                i = 0;
+                                while (reader.MoveToNextAttribute()) // Read the attributes.
+                                {
+                                    Script = Script + "XT.T.value('(@" + reader.Name.ToLower() +")[1]','" + Tipo(reader.Value)+"')" + Environment.NewLine;
+                                    Console.WriteLine("               " + reader.Name.ToLower() /* + "='" + reader.Value + "'    " /*+  reader.ValueType.FullName*/);
+                                    i = i + 1;
+                                    /*Stored = Stored + reader.LocalName + " " + Tipo(reader.Value);
+                                    if (i != (reader.AttributeCount))
+                                        Stored = Stored + ",";
+                                    /*else
+                                        Stored = Stored + reader.LocalName;
+                                    //reader.ReadEndElement();*/
+                                }
+                                Script = Script + " FROM " +XMLVar +".nodes('" + RutaXml(NodoTree,Node) + "') XT(T)" + Environment.NewLine;
+                                //Script = Script + ")";
+                            }
+                        }
+                    }
                         break;
                     case XmlNodeType.Text:
                         //Console.WriteLine(reader.Value);
@@ -75,8 +134,9 @@ namespace LeerXML
                         //Console.WriteLine("<!--{0}-->", reader.Value);
                         break;
                     case XmlNodeType.XmlDeclaration:
-                        //Console.WriteLine("<?xml version='1.0'?>");
-                        break;
+                    Console.WriteLine("<?{0} {1}?>", reader.Name, reader.Value);
+                    //Console.WriteLine("<?xml version='1.0'?>");
+                    break;
                     case XmlNodeType.Document:
                         break;
                     case XmlNodeType.DocumentType:
@@ -87,90 +147,59 @@ namespace LeerXML
                         break;
                     case XmlNodeType.EndElement:
                         //Console.WriteLine("</{0}>", reader.Name);
-                        {
-                            break;
-                        }
+                        break;
                 }
-                //Console.WriteLine(Stored);
-                Stored = Stored + Environment.NewLine;
-                //Console.ReadLine();
             }
-            Console.WriteLine(Stored);
-            Console.WriteLine(Stored.Length);
-
+            Console.WriteLine(Script);
+            Console.ReadLine();
+            return Script;
         }
-        public static void CreateTable(String XmlString)
-
+        public static string InsertWhile(string Cadena, string Table, string CFDI, List<String> Nodos, String NodoActual)
         {
-                int i = 0;
-                String Stored = "";
-                XmlTextReader reader = new XmlTextReader(XmlString);
-                //XmlTextReader reader = new XmlTextReader("books.xml");
-                while (reader.Read())
+            int start,at,end,count,ultimo = 0;
+            /*int at;
+            int end;
+            int count;*/
+            string Modified = " INSERT INTO @" + Table.ToLower() + Environment.NewLine +
+                            " SELECT XT.T.query('.') " + Environment.NewLine +
+                            " FROM " + CFDI+ ".nodes('"+ RutaXml(Nodos, NodoActual) + "') XT(T)" + Environment.NewLine+ 
+                            " SELECT @"+ NodoActual+"_maximo = MAX(id) FROM @" + Table + Environment.NewLine +
+                            " WHILE(@"+ NodoActual+"_indice <= @"+ NodoActual+"_maximo) " + Environment.NewLine +
+                            " BEGIN " + Environment.NewLine +
+                            "SELECT @"+NodoActual+"_nodo = "+ NodoActual+ "_nodo FROM @"+ Table.ToLower() +" WHERE id = @"+ NodoActual+"_indice" + Environment.NewLine;
+            end = Cadena.Length;
+            start = end / 2;
+            count = 0;
+            at = 0;
+            ultimo = 0;
+            while ((start <= end) && (at > -1))
+            {
+                // start+count must be a position within -str-.
+                count = end - start;
+                at = Cadena.IndexOf("INSERT", start, count);
+                if (at == -1) break;
+                ultimo = at;
+                //Console.Write("{0} ", at);
+                start = at + 1;
+            }
+
+            Cadena = Cadena.Insert(ultimo, Modified) + Environment.NewLine;
+            Cadena = Cadena + Environment.NewLine;
+            return Cadena;
+        }
+        public static string RutaXml(List<String> Nodos, String NodoActual)
+        {
+            string Cadena = "";
+            for (int i = 0; i < Nodos.Count;  i++)
                 {
-                    switch (reader.NodeType)
-                    {
-                        case XmlNodeType.Element:
-                            //Console.WriteLine("<{0}>", reader.Name);
-                            if (reader.AttributeCount != 0)
-                            {
-                                i = 0;
-                                Stored = Stored + "IF EXISTS " +
-                                    " (SELECT[name] FROM sys.tables " +
-                                    " WHERE[name] ='" + reader.LocalName + "')" +
-                                    " DROP TABLE " + reader.LocalName +
-                                    " CREATE TABLE " + reader.LocalName + "(";
-                                while (reader.MoveToNextAttribute()) // Read the attributes.
-                                {
-                                    //Console.WriteLine("         " + reader.Name /* + "='" + reader.Value + "'    " /*+  reader.ValueType.FullName*/);
-                                    i = i + 1;
-                                    Stored = Stored + reader.LocalName + " " + Tipo(reader.Value);
-                                    if (i != (reader.AttributeCount))
-                                        Stored = Stored + ",";
-                                    /*else
-                                        Stored = Stored + reader.LocalName;
-                                    //reader.ReadEndElement();*/
-                                }
-                                Stored = Stored + ")";
-                            }
-                            break;
-                        case XmlNodeType.Text:
-                            //Console.WriteLine(reader.Value);
-                            break;
-                        case XmlNodeType.CDATA:
-                            //Console.WriteLine("<![CDATA[{0}]]>", reader.Value);
-                            break;
-                        case XmlNodeType.ProcessingInstruction:
-                            //Console.WriteLine("<?{0} {1}?>", reader.Name, reader.Value);
-                            break;
-                        case XmlNodeType.Comment:
-                            //Console.WriteLine("<!--{0}-->", reader.Value);
-                            break;
-                        case XmlNodeType.XmlDeclaration:
-                            //Console.WriteLine("<?xml version='1.0'?>");
-                            break;
-                        case XmlNodeType.Document:
-                            break;
-                        case XmlNodeType.DocumentType:
-                            //Console.WriteLine("<!DOCTYPE {0} [{1}]", reader.Name, reader.Value);
-                            break;
-                        case XmlNodeType.EntityReference:
-                            //Console.WriteLine(reader.Name);
-                            break;
-                        case XmlNodeType.EndElement:
-                            //Console.WriteLine("</{0}>", reader.Name);
-                            {
-                                break;
-                            }
-                    }
-                    //Console.WriteLine(Stored);
-                    Stored = Stored + Environment.NewLine;
-                    //Console.ReadLine();
+            Cadena = Cadena + "*:" +Nodos[i];
+                if (i != Nodos.Count)
+                {
+                    Cadena = Cadena + "/";
                 }
-            Stored = Stored + "";
-            Conectar(Stored);
-                Console.WriteLine(Stored);
-                Console.WriteLine(Stored.Length);
+            }
+            Cadena = Cadena + "*:"+ NodoActual;
+            return Cadena;
         }
         public static string As(String Nodo)
         {
@@ -197,18 +226,16 @@ namespace LeerXML
             {
                 //Console.WriteLine($"Unable to parse '{input}'");
             }
-
             return Cadena;
-
         }
         public static string Tipo(String Nodo)
         {
             string input = String.Empty;
-            string Cadena = "VARCHAR";
+            string Cadena = "VARCHAR(" + Nodo.Length + ")";
             try
             {
                 float result = float.Parse(Nodo);
-                Cadena = "NUMERIC";
+                Cadena = "DECIMAL(18,6)";
                 return Cadena;
                 //Console.WriteLine(result);
             }
@@ -226,7 +253,6 @@ namespace LeerXML
             {
                 //Console.WriteLine($"Unable to parse '{input}'");
             }
-            
             return Cadena;
         }
     }
